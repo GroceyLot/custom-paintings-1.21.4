@@ -1,0 +1,30 @@
+{
+	"schemaVersion": 1,
+	"id": "custom-paintings",
+	"version": "${version}",
+	"name": "Custom Paintings",
+	"description": "Custom Paintings!",
+	"authors": [
+		"GroceyLot"
+	],
+	"contact": {
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/custom-paintings/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.cpaintings.CustomPaintings"
+		]
+	},
+	"mixins": [
+	],
+	"depends": {
+		"fabricloader": ">=0.16.9",
+		"minecraft": "~1.21.4",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+	}
+}

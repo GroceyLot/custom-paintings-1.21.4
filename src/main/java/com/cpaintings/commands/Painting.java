@@ -22,10 +22,9 @@ import net.minecraft.util.Identifier;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.entity.player.PlayerEntity;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class Painting {
+    @SuppressWarnings("unchecked")
     public static final ComponentType<MapIdComponent> mapIdComponentType =
             (ComponentType<MapIdComponent>) Registries.DATA_COMPONENT_TYPE.get(Identifier.of("minecraft", "map_id"));
 
@@ -255,7 +254,6 @@ public class Painting {
             giveMapToPlayer(source, map);
         } catch (Exception e) {
             source.sendError(Text.literal("An error occurred: " + e.getMessage()));
-            e.printStackTrace();
         }
     }
 }

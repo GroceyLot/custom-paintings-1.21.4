@@ -26,8 +26,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class Painting {
-    private static final Logger log = LoggerFactory.getLogger(Painting.class);
-    public static final ComponentType<MapIdComponent> mapIdComponentType = (ComponentType<MapIdComponent>) Registries.DATA_COMPONENT_TYPE.get(Identifier.of("minecraft", "map_id"));
+    public static final ComponentType<MapIdComponent> mapIdComponentType =
+            (ComponentType<MapIdComponent>) Registries.DATA_COMPONENT_TYPE.get(Identifier.of("minecraft", "map_id"));
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
@@ -37,7 +37,6 @@ public class Painting {
                                 String url = StringArgumentType.getString(context, "url");
                                 ServerCommandSource source = context.getSource();
 
-                                // Execute the painting logic asynchronously
                                 new Thread(() -> processPainting(source, url)).start();
                                 return 1;
                             })
@@ -55,15 +54,12 @@ public class Painting {
             }
         }
 
-        // Resize the image
         int targetWidth = 128;
         int targetHeight = 128;
 
-        // Use TYPE_INT_ARGB to preserve alpha
         BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = resized.createGraphics();
         try {
-            // Draw the original image onto the ARGB buffer
             g.drawImage(original, 0, 0, targetWidth, targetHeight, null);
         } finally {
             g.dispose();
@@ -72,11 +68,10 @@ public class Painting {
         return resized;
     }
 
-
     private static final Set<Long> usedChunks = new HashSet<>();
 
     private static long allocateChunk() {
-        long base = 100000; // Far away from spawn
+        long base = 100000;
         long chunk;
         do {
             chunk = base++;
@@ -151,32 +146,27 @@ public class Painting {
     };
 
     private static final float[] BRIGHTNESS_LEVELS = {
-            0.71f, // somewhat dark
-            0.86f, // somewhat light
-            1.00f, // full brightness
-            0.53f  // dark
+            0.71f,
+            0.86f,
+            1.00f,
+            0.53f
     };
 
     private static int mapColorToMapData(int argb) {
         int alpha = (argb >> 24) & 0xFF;
 
-        // If alpha is below 50%, treat it as transparent (return 0, which is "NONE / Transparent")
         if (alpha < 128) {
             return 0;
         }
 
-        // Extract RGB
-        Color target = new Color(argb, true); // 'true' ensures alpha is considered internally,
-        // though we only need the RGB portion now.
+        Color target = new Color(argb, true);
 
         int bestIndex = 0;
         double bestDistance = Double.MAX_VALUE;
 
-        // For each base color...
         for (int baseIndex = 1; baseIndex < MINECRAFT_MAP_COLORS.length; baseIndex++) {
             Color base = new Color(MINECRAFT_MAP_COLORS[baseIndex]);
 
-            // Try each of the 4 brightness levels...
             for (int shade = 0; shade < BRIGHTNESS_LEVELS.length; shade++) {
                 float factor = BRIGHTNESS_LEVELS[shade];
 
@@ -189,13 +179,11 @@ public class Painting {
 
                 if (distance < bestDistance) {
                     bestDistance = distance;
-                    // The final index is (base color index * 4) + shade
                     bestIndex = baseIndex * 4 + shade;
                 }
             }
         }
 
-        // Ensure it's within 0..255
         return bestIndex & 0xFF;
     }
 
@@ -207,44 +195,40 @@ public class Painting {
     }
 
     private static void updateMapStateWithImage(MapState mapState, BufferedImage image) {
-        // image is now 1024x1024, so each 8x8 block becomes 1 map pixel (128x128 map)
-        for (int x = 0; x < 128; x++) {
-            for (int z = 0; z < 128; z++) {
-                // Get the ARGB value from the image
+        for (int z = 0; z < 128; z++) {
+            for (int x = 0; x < 128; x++) {
                 int argb = image.getRGB(x, z);
+                int alpha = (argb >> 24) & 0xFF;
 
-                // Convert ARGB to a Minecraft map color index
-                int colorIndex = mapColorToMapData(argb);
-
-                // Write the color index to the map
-                mapState.colors[x + z * 128] = (byte) colorIndex;
+                if (alpha < 128) {
+                    mapState.colors[x + z * 128] = 0;
+                } else {
+                    int colorIndex = mapColorToMapData(argb);
+                    mapState.colors[x + z * 128] = (byte) colorIndex;
+                }
             }
         }
-        mapState.markDirty(); // Mark the map data as dirty so the game knows it changed
+        mapState.markDirty();
     }
 
     private static ItemStack createMap(ServerWorld world, long chunkPos, BufferedImage image) {
         int startX = (int) (chunkPos >> 32) << 4;
         int startZ = (int) (chunkPos & 0xFFFFFFFFL) << 4;
 
-        // Create a new map state
         MapState mapState = MapState.of(
-                startX + 64,       // centerX
-                startZ + 64,       // centerZ
-                (byte) 2,          // scale (byte value)
-                false,             // showDecorations
-                false,             // unlimitedTracking
-                world.getRegistryKey() // dimension
+                startX + 64,
+                startZ + 64,
+                (byte) 2,
+                false,
+                false,
+                world.getRegistryKey()
         );
 
-        // Update map state with the image
         updateMapStateWithImage(mapState, image);
 
-        // Add map state to the world storage
         MapIdComponent mapId = world.increaseAndGetMapId();
         world.putMapState(mapId, mapState);
 
-        // Create an ItemStack for the filled map
         ItemStack map = new ItemStack(Items.FILLED_MAP);
         map.set(mapIdComponentType, mapId);
 
@@ -274,5 +258,4 @@ public class Painting {
             e.printStackTrace();
         }
     }
-
 }

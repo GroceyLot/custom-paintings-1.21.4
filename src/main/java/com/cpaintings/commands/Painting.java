@@ -1,72 +1,40 @@
 package com.cpaintings.commands;
 
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.component.ComponentType;
 import net.minecraft.component.type.MapIdComponent;
+import net.minecraft.component.type.LoreComponent;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.item.map.MapState;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
 import java.net.URI;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.entity.player.PlayerEntity;
 
 public class Painting {
     @SuppressWarnings("unchecked")
     public static final ComponentType<MapIdComponent> mapIdComponentType =
             (ComponentType<MapIdComponent>) Registries.DATA_COMPONENT_TYPE.get(Identifier.of("minecraft", "map_id"));
+    @SuppressWarnings("unchecked")
+    public static final ComponentType<LoreComponent> loreComponentType =
+            (ComponentType<LoreComponent>) Registries.DATA_COMPONENT_TYPE.get(Identifier.of("minecraft", "lore"));
 
-    public static void register() {
-        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-            dispatcher.register(CommandManager.literal("painting")
-                    .then(CommandManager.argument("url", StringArgumentType.string())
-                            .executes(context -> {
-                                String url = StringArgumentType.getString(context, "url");
-                                ServerCommandSource source = context.getSource();
-
-                                new Thread(() -> processPainting(source, url)).start();
-                                return 1;
-                            })
-                    )
-            );
-        });
-    }
-
-    private static BufferedImage downloadAndResizeImage(String url) throws Exception {
-        BufferedImage original;
-        try (InputStream in = new URI(url).toURL().openStream()) {
-            original = ImageIO.read(in);
-            if (original == null) {
-                throw new Exception("Unsupported image format or invalid image.");
-            }
-        }
-
-        int targetWidth = 128;
-        int targetHeight = 128;
-
-        BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = resized.createGraphics();
-        try {
-            g.drawImage(original, 0, 0, targetWidth, targetHeight, null);
-        } finally {
-            g.dispose();
-        }
-
-        return resized;
-    }
-
+    // Keeps track of used "chunk positions" so each map is unique
     private static final Set<Long> usedChunks = new HashSet<>();
 
     private static long allocateChunk() {
@@ -79,6 +47,7 @@ public class Painting {
         return chunk;
     }
 
+    // These are the standard Minecraft "base colors" for map color indices
     private static final int[] MINECRAFT_MAP_COLORS = {
             0x000000, // 0  (NONE / Transparent)
             0x7FB238, // 1  (GRASS)
@@ -144,6 +113,7 @@ public class Painting {
             0x7FA796  // 61 (GLOW_LICHEN)
     };
 
+    // These are the standard brightness levels for Minecraft maps
     private static final float[] BRIGHTNESS_LEVELS = {
             0.71f,
             0.86f,
@@ -151,56 +121,171 @@ public class Painting {
             0.53f
     };
 
-    private static int mapColorToMapData(int argb) {
-        int alpha = (argb >> 24) & 0xFF;
+    public static void register() {
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            dispatcher.register(
+                    CommandManager.literal("painting")
+                            .then(
+                                    CommandManager.argument("url", StringArgumentType.string())
 
-        if (alpha < 128) {
-            return 0;
-        }
+                                            // 1) Just /painting <url>
+                                            .executes(context -> {
+                                                String url = StringArgumentType.getString(context, "url");
+                                                ServerCommandSource source = context.getSource();
+                                                new Thread(() -> processPainting(source, url, 1, 1)).start();
+                                                return 1;
+                                            })
 
-        Color target = new Color(argb, true);
+                                            // 2) /painting <url> <blocksx>
+                                            .then(
+                                                    CommandManager.argument("blocksx", IntegerArgumentType.integer(1))
+                                                            .executes(context -> {
+                                                                String url = StringArgumentType.getString(context, "url");
+                                                                int blocksx = IntegerArgumentType.getInteger(context, "blocksx");
+                                                                ServerCommandSource source = context.getSource();
+                                                                new Thread(() -> processPainting(source, url, blocksx, 1)).start();
+                                                                return 1;
+                                                            })
 
-        int bestIndex = 0;
-        double bestDistance = Double.MAX_VALUE;
+                                                            // 3) /painting <url> <blocksx> <blocksy>
+                                                            .then(
+                                                                    CommandManager.argument("blocksy", IntegerArgumentType.integer(1))
+                                                                            .executes(context -> {
+                                                                                String url = StringArgumentType.getString(context, "url");
+                                                                                int blocksx = IntegerArgumentType.getInteger(context, "blocksx");
+                                                                                int blocksy = IntegerArgumentType.getInteger(context, "blocksy");
+                                                                                ServerCommandSource source = context.getSource();
+                                                                                new Thread(() -> processPainting(source, url, blocksx, blocksy)).start();
+                                                                                return 1;
+                                                                            })
+                                                            )
+                                            )
+                            )
+            );
+        });
+    }
 
-        for (int baseIndex = 1; baseIndex < MINECRAFT_MAP_COLORS.length; baseIndex++) {
-            Color base = new Color(MINECRAFT_MAP_COLORS[baseIndex]);
+    /**
+     * Main logic to handle painting across multiple maps.
+     */
+    private static void processPainting(ServerCommandSource source, String url, int blocksx, int blocksy) {
+        try {
+            BufferedImage originalImage = downloadImage(url);
+            if (originalImage == null) {
+                throw new Exception("Image could not be read (null).");
+            }
 
-            for (int shade = 0; shade < BRIGHTNESS_LEVELS.length; shade++) {
-                float factor = BRIGHTNESS_LEVELS[shade];
+            // 1) Resize the image to (128 * blocksx) by (128 * blocksy)
+            int totalWidth = 128 * blocksx;
+            int totalHeight = 128 * blocksy;
+            BufferedImage resized = resizeImage(originalImage, totalWidth, totalHeight);
 
-                int r = (int) (base.getRed()   * factor);
-                int g = (int) (base.getGreen() * factor);
-                int b = (int) (base.getBlue()  * factor);
+            ServerWorld world = source.getWorld();
+            PlayerEntity player = source.getPlayer();
+            if (player == null) {
+                source.sendError(Text.literal("Player not found."));
+                return;
+            }
 
-                Color variant = new Color(r, g, b);
-                double distance = calculateColorDistance(target, variant);
+            // 2) Split into sub-images (each 128x128) and create maps
+            for (int y = 0; y < blocksy; y++) {
+                // Invert the Y for bottom-left = (0,0)
+                int subY = (blocksy - 1 - y);
+                for (int x = 0; x < blocksx; x++) {
+                    // Each tile is 128x128
+                    BufferedImage tile = resized.getSubimage(x * 128, subY * 128, 128, 128);
 
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    bestIndex = baseIndex * 4 + shade;
+                    // Allocate chunk for each tile
+                    long chunkPos = allocateChunk();
+
+                    // Create a unique MapState for this tile
+                    MapState mapState = createMapStateForTile(world, chunkPos, tile);
+
+                    // Get a new map ID from the world
+                    MapIdComponent mapId = world.increaseAndGetMapId();
+                    world.putMapState(mapId, mapState);
+
+                    // Create the filled map item stack
+                    ItemStack mapItem = new ItemStack(Items.FILLED_MAP);
+                    mapItem.set(mapIdComponentType, mapId);
+
+                    LoreComponent lore = new LoreComponent(Collections.singletonList(Text.literal("[" + x + "," + y + "]")));
+
+                    // Name it as [x,y] so player knows where it belongs
+                    if (blocksx > 1 && blocksy > 1) {
+                        mapItem.set(loreComponentType, lore);
+                    }
+
+                    // Give it to player
+                    player.getInventory().insertStack(mapItem);
                 }
             }
+
+            source.sendFeedback(
+                    () -> Text.literal("Created " + (blocksx * blocksy) + " maps. Check your inventory!"),
+                    false
+            );
+        } catch (Exception e) {
+            source.sendError(Text.literal("An error occurred: " + e.getMessage()));
+            e.printStackTrace();
         }
-
-        return bestIndex & 0xFF;
     }
 
-    private static double calculateColorDistance(Color c1, Color c2) {
-        int redDiff = c1.getRed() - c2.getRed();
-        int greenDiff = c1.getGreen() - c2.getGreen();
-        int blueDiff = c1.getBlue() - c2.getBlue();
-        return Math.sqrt(redDiff * redDiff + greenDiff * greenDiff + blueDiff * blueDiff);
+    /**
+     * Download an image from a URL into a BufferedImage.
+     */
+    private static BufferedImage downloadImage(String url) throws Exception {
+        try (InputStream in = new URI(url).toURL().openStream()) {
+            return ImageIO.read(in);
+        }
     }
 
+    /**
+     * Resize a BufferedImage to the given width and height.
+     */
+    private static BufferedImage resizeImage(BufferedImage original, int targetWidth, int targetHeight) {
+        BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = resized.createGraphics();
+        try {
+            g.drawImage(original, 0, 0, targetWidth, targetHeight, null);
+        } finally {
+            g.dispose();
+        }
+        return resized;
+    }
+
+    /**
+     * Create a MapState for the given tile (128x128) and place it at a "virtual" chunk position.
+     */
+    private static MapState createMapStateForTile(ServerWorld world, long chunkPos, BufferedImage image) {
+        int centerX = (int) (chunkPos >> 32) << 4; // chunkPos >> 32 = "high bits"
+        int centerZ = (int) (chunkPos & 0xFFFFFFFFL) << 4; // chunkPos & 0xFFFFFFFF = "low bits"
+
+        // centerX + 64, centerZ + 64 to center it roughly in the chunk
+        MapState mapState = MapState.of(
+                centerX + 64,
+                centerZ + 64,
+                (byte) 2,  // scale 1:4 (byte 2)
+                false,     // tracking position
+                false,     // unlimited tracking
+                world.getRegistryKey()
+        );
+
+        // Convert the 128x128 tile into Minecraft map colors
+        updateMapStateWithImage(mapState, image);
+        return mapState;
+    }
+
+    /**
+     * Convert each pixel of the 128x128 tile to a Minecraft map color index.
+     */
     private static void updateMapStateWithImage(MapState mapState, BufferedImage image) {
         for (int z = 0; z < 128; z++) {
             for (int x = 0; x < 128; x++) {
                 int argb = image.getRGB(x, z);
                 int alpha = (argb >> 24) & 0xFF;
-
                 if (alpha < 128) {
-                    mapState.colors[x + z * 128] = 0;
+                    mapState.colors[x + z * 128] = 0; // transparent
                 } else {
                     int colorIndex = mapColorToMapData(argb);
                     mapState.colors[x + z * 128] = (byte) colorIndex;
@@ -210,50 +295,47 @@ public class Painting {
         mapState.markDirty();
     }
 
-    private static ItemStack createMap(ServerWorld world, long chunkPos, BufferedImage image) {
-        int startX = (int) (chunkPos >> 32) << 4;
-        int startZ = (int) (chunkPos & 0xFFFFFFFFL) << 4;
+    /**
+     * Converts an ARGB color to the best matching MC map color+shade index (0..255).
+     */
+    private static int mapColorToMapData(int argb) {
+        Color target = new Color(argb, true);
 
-        MapState mapState = MapState.of(
-                startX + 64,
-                startZ + 64,
-                (byte) 2,
-                false,
-                false,
-                world.getRegistryKey()
-        );
+        int bestIndex = 0;
+        double bestDistance = Double.MAX_VALUE;
 
-        updateMapStateWithImage(mapState, image);
+        // Ignore fully transparent
+        if (target.getAlpha() < 128) {
+            return 0;
+        }
 
-        MapIdComponent mapId = world.increaseAndGetMapId();
-        world.putMapState(mapId, mapState);
+        for (int baseIndex = 1; baseIndex < MINECRAFT_MAP_COLORS.length; baseIndex++) {
+            Color base = new Color(MINECRAFT_MAP_COLORS[baseIndex]);
+            for (int shade = 0; shade < BRIGHTNESS_LEVELS.length; shade++) {
+                float factor = BRIGHTNESS_LEVELS[shade];
+                int r = (int) (base.getRed()   * factor);
+                int g = (int) (base.getGreen() * factor);
+                int b = (int) (base.getBlue()  * factor);
 
-        ItemStack map = new ItemStack(Items.FILLED_MAP);
-        map.set(mapIdComponentType, mapId);
-
-        return map;
+                Color variant = new Color(r, g, b);
+                double distance = colorDistance(target, variant);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    // formula for map color index: baseIndex*4 + shade
+                    bestIndex = baseIndex * 4 + shade;
+                }
+            }
+        }
+        return bestIndex & 0xFF;
     }
 
-    private static void giveMapToPlayer(ServerCommandSource source, ItemStack map) {
-        PlayerEntity player = source.getPlayer();
-        if (player != null) {
-            player.getInventory().insertStack(map);
-            source.sendFeedback(() -> Text.literal("Map added to your inventory!"), false);
-        } else {
-            source.sendError(Text.literal("Player not found."));
-        }
-    }
-
-    private static void processPainting(ServerCommandSource source, String url) {
-        try {
-            BufferedImage image = downloadAndResizeImage(url);
-            ServerWorld world = source.getWorld();
-            long chunkPos = allocateChunk();
-
-            ItemStack map = createMap(world, chunkPos, image);
-            giveMapToPlayer(source, map);
-        } catch (Exception e) {
-            source.sendError(Text.literal("An error occurred: " + e.getMessage()));
-        }
+    /**
+     * Calculate Euclidean distance between two colors (R,G,B).
+     */
+    private static double colorDistance(Color c1, Color c2) {
+        int redDiff   = c1.getRed()   - c2.getRed();
+        int greenDiff = c1.getGreen() - c2.getGreen();
+        int blueDiff  = c1.getBlue()  - c2.getBlue();
+        return Math.sqrt(redDiff * redDiff + greenDiff * greenDiff + blueDiff * blueDiff);
     }
 }

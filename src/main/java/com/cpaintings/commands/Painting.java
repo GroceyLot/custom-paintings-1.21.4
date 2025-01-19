@@ -7,6 +7,7 @@ import net.minecraft.component.ComponentType;
 import net.minecraft.component.type.MapIdComponent;
 import net.minecraft.component.type.LoreComponent;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.item.map.MapState;
@@ -166,6 +167,27 @@ public class Painting {
     }
 
     /**
+     * Helper function to check if inventory is full
+     */
+    public static boolean isInventoryFull(PlayerEntity player) {
+        Inventory inventory = player.getInventory();
+
+        // Main inventory slots range (0 to 35 in most cases)
+        // Slot 36 and beyond are for armor, offhand, and crafting
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = inventory.getStack(i);
+
+            // If the stack is empty, there's room in the inventory
+            if (stack.isEmpty()) {
+                return false;
+            }
+        }
+
+        // No empty slots found in the main inventory or hotbar
+        return true;
+    }
+
+    /**
      * Main logic to handle painting across multiple maps.
      */
     private static void processPainting(ServerCommandSource source, String url, int blocksx, int blocksy) {
@@ -211,13 +233,17 @@ public class Painting {
 
                     LoreComponent lore = new LoreComponent(Collections.singletonList(Text.literal("[" + x + "," + y + "]")));
 
-                    // Name it as [x,y] so player knows where it belongs
+                    // Name it as [x,y] so player knows where it belongs (only if there's more than one)
                     if (blocksx > 1 && blocksy > 1) {
                         mapItem.set(loreComponentType, lore);
                     }
 
-                    // Give it to player
-                    player.getInventory().insertStack(mapItem);
+                    // If the inventory is full, drop it on the ground
+                    if (isInventoryFull(player)) {
+                        player.dropItem(mapItem, false);
+                    } else {
+                        player.getInventory().insertStack(mapItem);
+                    }
                 }
             }
 

@@ -8,6 +8,9 @@
 		"GroceyLot"
 	],
 	"contact": {
+		"issues": "https://github.com/GroceyLot/custom-paintings-1.21.4/issues",
+		"sources": "https://github.com/GroceyLot/custom-paintings-1.21.4",
+		"homepage": "https://modrinth.com/mod/custom-painting"
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/custom-paintings/icon.png",

@@ -123,47 +123,45 @@ public class Painting {
     };
 
     public static void register() {
-        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-            dispatcher.register(
-                    CommandManager.literal("painting")
-                            .then(
-                                    CommandManager.argument("url", StringArgumentType.string())
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(
+                CommandManager.literal("painting")
+                        .then(
+                                CommandManager.argument("url", StringArgumentType.string())
 
-                                            // 1) Just /painting <url>
-                                            .executes(context -> {
-                                                String url = StringArgumentType.getString(context, "url");
-                                                ServerCommandSource source = context.getSource();
-                                                new Thread(() -> processPainting(source, url, 1, 1)).start();
-                                                return 1;
-                                            })
+                                        // 1) Just /painting <url>
+                                        .executes(context -> {
+                                            String url = StringArgumentType.getString(context, "url");
+                                            ServerCommandSource source = context.getSource();
+                                            new Thread(() -> processPainting(source, url, 1, 1)).start();
+                                            return 1;
+                                        })
 
-                                            // 2) /painting <url> <blocksx>
-                                            .then(
-                                                    CommandManager.argument("blocksx", IntegerArgumentType.integer(1))
-                                                            .executes(context -> {
-                                                                String url = StringArgumentType.getString(context, "url");
-                                                                int blocksx = IntegerArgumentType.getInteger(context, "blocksx");
-                                                                ServerCommandSource source = context.getSource();
-                                                                new Thread(() -> processPainting(source, url, blocksx, 1)).start();
-                                                                return 1;
-                                                            })
+                                        // 2) /painting <url> <blocksx>
+                                        .then(
+                                                CommandManager.argument("blocksx", IntegerArgumentType.integer(1))
+                                                        .executes(context -> {
+                                                            String url = StringArgumentType.getString(context, "url");
+                                                            int blocksx = IntegerArgumentType.getInteger(context, "blocksx");
+                                                            ServerCommandSource source = context.getSource();
+                                                            new Thread(() -> processPainting(source, url, blocksx, 1)).start();
+                                                            return 1;
+                                                        })
 
-                                                            // 3) /painting <url> <blocksx> <blocksy>
-                                                            .then(
-                                                                    CommandManager.argument("blocksy", IntegerArgumentType.integer(1))
-                                                                            .executes(context -> {
-                                                                                String url = StringArgumentType.getString(context, "url");
-                                                                                int blocksx = IntegerArgumentType.getInteger(context, "blocksx");
-                                                                                int blocksy = IntegerArgumentType.getInteger(context, "blocksy");
-                                                                                ServerCommandSource source = context.getSource();
-                                                                                new Thread(() -> processPainting(source, url, blocksx, blocksy)).start();
-                                                                                return 1;
-                                                                            })
-                                                            )
-                                            )
-                            )
-            );
-        });
+                                                        // 3) /painting <url> <blocksx> <blocksy>
+                                                        .then(
+                                                                CommandManager.argument("blocksy", IntegerArgumentType.integer(1))
+                                                                        .executes(context -> {
+                                                                            String url = StringArgumentType.getString(context, "url");
+                                                                            int blocksx = IntegerArgumentType.getInteger(context, "blocksx");
+                                                                            int blocksy = IntegerArgumentType.getInteger(context, "blocksy");
+                                                                            ServerCommandSource source = context.getSource();
+                                                                            new Thread(() -> processPainting(source, url, blocksx, blocksy)).start();
+                                                                            return 1;
+                                                                        })
+                                                        )
+                                        )
+                        )
+        ));
     }
 
     /**
@@ -253,7 +251,6 @@ public class Painting {
             );
         } catch (Exception e) {
             source.sendError(Text.literal("An error occurred: " + e.getMessage()));
-            e.printStackTrace();
         }
     }
 
